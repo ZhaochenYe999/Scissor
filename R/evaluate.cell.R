@@ -30,7 +30,17 @@ evaluate.cell <- function(Load_file, Scissor_result, FDR_cutoff = 0.05, bootstra
 
     library(progress)
     library(scales)
-    load(Load_file)     # X, Y, network, Expression_bulk, Expression_cell
+    ############## MODIFIED ################
+    # load(Load_file)     # X, Y, network, Expression_bulk, Expression_cell
+    res = readRDS(Load_file)
+    X = res$X
+    Y = res$Y
+    network = res$network
+    Expression_bulk = res$Expression_bulk
+    Expression_cell = res$Expression_cell
+    rm(res)
+    print('Loading finished!')
+    #######################################
 
     selected_cell <- c(Scissor_result$Scissor_pos, Scissor_result$Scissor_neg)
     m <- ncol(Expression_bulk)

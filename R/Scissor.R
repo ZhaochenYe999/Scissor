@@ -124,7 +124,17 @@ Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
         }
         save(X, Y, network, Expression_bulk, Expression_cell, file = Save_file)
     }else{
-        load(Load_file)
+        ###### MOD: Load the preprocessed data ######
+        # load(Load_file)
+        res = readRDS(Load_file)
+        X = res$X
+        Y = res$Y
+        network = res$network
+        Expression_bulk = res$Expression_bulk
+        Expression_cell = res$Expression_cell
+        rm(res)
+        print('Loading finished!')
+        ##############################################
     }
 
     if (is.null(alpha)){

@@ -34,7 +34,17 @@ CoxL0=function(x, y, Omega=NULL, alpha=1.0, lambda=NULL, nlambda=100, rlambda=NU
     penalty=ifelse(alpha==1, "Lasso", "Net")
     adaptive=c(ifelse(any(wbeta!=1), TRUE, FALSE),ifelse(any(sgn!=1), TRUE, FALSE))
 
-    Omega=rbind(0,cbind(0,Omega)); sgn1=c(1,sgn) # intercept
+    ########################### MODIFIED ###################################
+    #Omega=rbind(0,cbind(0,Omega))
+    sgn1=c(1,sgn) # intercept
+
+    p <- nrow(Omega)
+    zero_row <- Matrix(0, nrow = 1, ncol = p, sparse = TRUE)
+    zero_col <- Matrix(0, nrow = p + 1, ncol = 1, sparse = TRUE)
+    Omega <- rbind(zero_row, Omega)
+    Omega <- cbind(zero_col, Omega)
+    ########################### MODIFIED ###################################
+
     ## Check Omega: positive off-diagonal, zero diagonal
     if (any(diag(Omega)!=0)) {
       diag(Omega)=0
