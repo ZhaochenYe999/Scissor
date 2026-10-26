@@ -1,3 +1,7 @@
 exportPattern("^[[:alpha:]]+")
 importFrom(Rcpp, evalCpp)
 useDynLib(Scissor, .registration = TRUE)
+
+import(Matrix)
+importFrom(dplyr, filter, select, "%>%")
+importFrom(harmony, RunHarmony)

@@ -38,3 +38,32 @@ Duanchen Sun, Xiangnan Guan, Amy E. Moran, Ling-Yun Wu, David Z. Qian, Pepper Sc
 Scissor is licensed under the GNU General Public License v3.0.
 
 Improvements and new features of Scissor will be updated on a regular basis. Please post on the [GitHub discussion page](https://github.com/sunduanchen/Scissor/discussions) with any questions.
+
+### Modifications ###
+This is a modified version of Scissor (modified by Zhaochen Ye, October 2026), distributed under the same GNU General Public License v3.0. Changed code is marked with `MOD` comments, with the original code kept as comments.
+
+Main modifications include:
+1. Preprocessing of single-cell and bulk data
+2. Keeping the cell neighborhood matrix sparse
+3. Parallelization of permutations in reliability test
+
+#### Installation of this modified version ####
+Prerequisites:
+* R (*version >= 4.1.0*) and Seurat (*version >= 5.0.0*).
+* A C++ compiler, since Scissor compiles C++ code during installation:
+    + Windows: [Rtools](https://cran.r-project.org/bin/windows/Rtools/) matching your R version.
+    + macOS: Xcode command line tools (`xcode-select --install` in a terminal).
+    + Linux: `gcc`/`g++` (e.g. `sudo apt install build-essential`). On an HPC cluster, load a GCC module; if R comes from conda, install the conda compilers instead (`conda install -c conda-forge compilers`).
+* `preprocessCore` is a Bioconductor package, so it is installed separately before Scissor.
+
+```r
+install.packages(c("remotes", "BiocManager"))
+BiocManager::install("preprocessCore")
+remotes::install_github("ZhaochenYe999/Scissor")
+```
+
+
+New requirements for the input:
+* `bulk_dataset` The bulk expression matrix (genes x samples), Scissor should be robust to choice of count/tpm/cpm due to the following quantile normalization.
+* `phenotype` The bulk metadata. If `family="cox"`, it must be a dataframe with sample names as the rownames and the columns being survival time and censoring status, named as `time` and `status`; if `family="gaussian" or "binomial"`, it must be a named vector, matching the input sample names.
+* `sc_dataset` Ideally a Seurat (v5) object. Scissor will rerun clustering for the first run, including HVG identification, batch correction, and cell-cell graph construction.

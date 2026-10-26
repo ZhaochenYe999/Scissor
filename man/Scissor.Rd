@@ -12,28 +12,35 @@ Scissor(
   alpha = NULL,
   cutoff = 0.2,
   family = c("gaussian", "binomial", "cox"),
-  Save_file = "Scissor_inputs.RData",
+  sc_correct_batch = TRUE,
+  sc_batch = NULL,
+  only_hvg = TRUE,
+  n_hvg = 4000,
+  Save_file = "Scissor_inputs.rds",
   Load_file = NULL
 )
 }
 \arguments{
-\item{bulk_dataset}{Bulk expression matrix of related disease. Each row represents a gene and each column represents a sample.}
+\item{bulk_dataset}{Bulk expression matrix of related disease. Each row represents a gene and each column represents a sample.
+Counts, TPM or CPM all work, since the data are quantile-normalized together with the single-cell data. Genes expressed in fewer
+than 10 samples and samples with fewer than 10 expressed genes are removed.}
 
-\item{sc_dataset}{Single-cell RNA-seq expression matrix of related disease. Each row represents a gene and each column represents a sample.
-A Seurat object that contains the preprocessed data and constructed network is preferred. Otherwise, a cell-cell similarity network is
-constructed based on the input matrix.}
+\item{sc_dataset}{A Seurat (v5) object with raw counts. It is preprocessed with \code{\link{sc_preprocess}} (HVG selection,
+optional Harmony batch correction, cell-cell graph construction) on every run without \code{Load_file}.}
 
-\item{phenotype}{Phenotype annotation of each bulk sample. It can be a continuous dependent variable,
+\item{phenotype}{Phenotype annotation of each bulk sample, named by bulk sample. It can be a continuous dependent variable,
 binary group indicator vector, or clinical survival data:
   \itemize{
-  \item Continuous dependent variable. Should be a quantitative vector for \code{family = gaussian}.
-  \item Binary group indicator vector. Should be either a 0-1 encoded vector or a factor with two levels for \code{family = binomial}.
-  \item Clinical survival data. Should be a two-column matrix with columns named 'time' and 'status'. The latter is a binary variable,
-  with '1' indicating event (e.g.recurrence of cancer or death), and '0' indicating right censored.
-  The function \code{Surv()} in package survival produces such a matrix.
+  \item Continuous dependent variable. Should be a named quantitative vector for \code{family = gaussian}.
+  \item Binary group indicator vector. Should be a named 0-1 encoded vector or a factor with two levels for \code{family = binomial}.
+  For a factor, the first level is coded 0 and the second 1.
+  \item Clinical survival data. Should be a two-column data frame or matrix with bulk sample names as rownames and columns named
+  'time' and 'status'. The latter is a binary variable, with '1' indicating event (e.g.recurrence of cancer or death), and '0'
+  indicating right censored.
   }}
 
-\item{tag}{Names for each phenotypic group. Used for linear and logistic regressions only.}
+\item{tag}{Names for each phenotypic group. Required for logistic regression. For linear regression, give one tag per distinct
+phenotype value (e.g. disease stages), or leave \code{NULL} for a continuous phenotype.}
 
 \item{alpha}{Parameter used to balance the effect of the l1 norm and the network-based penalties. It can be a number or a searching vector.
 If \code{alpha = NULL}, a default searching vector is used. The range of alpha is in \code{[0,1]}. A larger alpha lays more emphasis on the l1 norm.}
@@ -44,9 +51,19 @@ Scissor selected cells. A cutoff less than \code{50\%} (default \code{20\%}) is 
 \item{family}{Response type for the regression model. It depends on the type of the given phenotype and
 can be \code{family = gaussian} for linear regression, \code{family = binomial} for classification, or \code{family = cox} for Cox regression.}
 
-\item{Save_file}{File name for saving the preprocessed regression inputs into a RData.}
+\item{sc_correct_batch}{Logical. Run Harmony batch correction on \code{sc_dataset}. Only used if \code{sc_batch} is found in its metadata.}
 
-\item{Load_file}{File name for loading the preprocessed regression inputs. It can help to tune the model parameter \code{alpha}.
+\item{sc_batch}{Name of the \code{sc_dataset} metadata column giving the batch. If \code{NULL}, no batch correction is done.}
+
+\item{only_hvg}{Logical. Use only the highly variable genes of \code{sc_dataset} (shared with the bulk data) to correlate cells and bulk samples.
+If \code{FALSE}, all shared genes are used.}
+
+\item{n_hvg}{Number of highly variable genes to select in \code{sc_dataset}.}
+
+\item{Save_file}{File name for saving the preprocessed regression inputs into an RDS file.}
+
+\item{Load_file}{File name of an RDS file saved by a previous run (\code{Save_file}). Skips preprocessing; it can help to tune the
+model parameter \code{alpha}. \code{.RData} files saved by the original Scissor cannot be loaded.
 Please see Scissor Tutorial for more details.}
 }
 \value{
@@ -73,5 +90,5 @@ Scissor positive (Scissor+) cells and Scissor negative (Scissor-) cells, which a
 with the phenotype of interest, respectively.
 }
 \references{
-Duanchen Sun and Zheng Xia (2021): Phenotype-guided subpopulation identification from single-cell sequencing data.
+Duanchen Sun and Zheng Xia (2021): Phenotype-guided subpopulation identification from single-cell sequencing data. Nature Biotechnology.
 }

@@ -87,10 +87,13 @@ evaluate.cell <- function(Load_file, Scissor_result, FDR_cutoff = 0.05, bootstra
         }else{
             Y2 <- Y[index]
         }
-        bootstrap_fit <- NULL
-        while (is.null(bootstrap_fit$fit)){
-            bootstrap_fit <- APML1(X2, Y2, family = family, penalty = "Net", alpha = alpha, Omega = network, lambda = lambda)
-        }
+        # bootstrap_fit <- NULL
+        # while (is.null(bootstrap_fit$fit)){
+        #     bootstrap_fit <- APML1(X2, Y2, family = family, penalty = "Net", alpha = alpha, Omega = network, lambda = lambda)
+        # }
+        # MOD: single fit (deterministic, so retrying could only loop forever)
+        bootstrap_fit <- APML1(X2, Y2, family = family, penalty = "Net", alpha = alpha, Omega = network, lambda = lambda)
+        if (is.null(bootstrap_fit$fit)) stop("APML1 failed to fit bootstrap sample ", i, ".")
         if (family == "binomial"){
             Coefs_tmp <- as.numeric(bootstrap_fit$Beta[2:(ncol(X2)+1),])
         }else{

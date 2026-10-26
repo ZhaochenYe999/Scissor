@@ -1,4 +1,5 @@
-test_lm <- function(X, Y, network, alpha, cell_num, n = 100, nfold = 10){
+test_lm <- function(X, Y, network, alpha, cell_num, n = 100, nfold = 10,
+                    bkg_stat=NULL, workers=min(8, future::availableCores())){ ### MOD: parallelizing the permutations ###
 
     set.seed(1)
     m <- nrow(X)
@@ -12,11 +13,17 @@ test_lm <- function(X, Y, network, alpha, cell_num, n = 100, nfold = 10){
         c_index <- which(index0 == j)
         X_train <- X[-c_index,]
         Y_train <- Y[-c_index]
-        fit <- NULL
-        while (is.null(fit$fit)){
-            set.seed(123)
-            fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net", alpha = alpha, Omega = network, nlambda = 100)
-        }
+
+        ####### MOD: single fit, no randomness when nfolds = 1, so while could only loop forever ######
+        # fit <- NULL
+        # while (is.null(fit$fit)){
+        #     set.seed(123)
+        #     fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net", alpha = alpha, Omega = network, nlambda = 100)
+        # }
+        fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net", alpha = alpha, Omega = network, nlambda = 100)
+        if (is.null(fit$fit)) stop("APML1 failed to fit fold ", j, " with the true labels.")
+        ################################################################################################
+
         index <- which.min(abs(fit$fit$nzero - cell_num))
         Coefs <- as.numeric(fit$Beta[,index])
         Cell1 <- Coefs[which(Coefs > 0)]
@@ -31,49 +38,100 @@ test_lm <- function(X, Y, network, alpha, cell_num, n = 100, nfold = 10){
         if (j == nfold) cat("Finished!\n")
     }
 
-    print("|**************************************************|")
-    print("Perform cross-validation on X with permutated label")
-    MSE_test_back <- list()
-    pb2 <- progress_bar$new(total = n)
-    for (i in 1:n){
-        set.seed(i+100)
-        MSE_test_back[[i]] <- matrix(0, nfold, 1, dimnames = list(paste0("Testing_", 1:nfold), "MSE"))
-        Y2 <- Y[sample(m)]
-        for (j in 1:nfold){
-            c_index <- which(index0 == j)
-            X_train <- X[-c_index,]
-            Y_train <- Y2[-c_index]
-            fit <- NULL
-            while (is.null(fit$fit)){
-                set.seed(123)
-                fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net", alpha = alpha, Omega = network, nlambda = 100)
-            }
-            index <- which.min(abs(fit$fit$nzero - cell_num))
-            Coefs <- as.numeric(fit$Beta[,index])
-            Cell1 <- Coefs[which(Coefs > 0)]
-            Cell2 <- Coefs[which(Coefs < 0)]
+    ###################### MODIFIED: parallelized permutations ##################
+    # print("|**************************************************|")
+    # print("Perform cross-validation on X with permutated label")
+    # MSE_test_back <- list()
+    # pb2 <- progress_bar$new(total = n)
+    # for (i in 1:n){
+    #     set.seed(i+100)
+    #     MSE_test_back[[i]] <- matrix(0, nfold, 1, dimnames = list(paste0("Testing_", 1:nfold), "MSE"))
+    #     Y2 <- Y[sample(m)]
+    #     for (j in 1:nfold){
+    #         c_index <- which(index0 == j)
+    #         X_train <- X[-c_index,]
+    #         Y_train <- Y2[-c_index]
+    #         fit <- NULL
+    #         while (is.null(fit$fit)){
+    #             set.seed(123)
+    #             fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net", alpha = alpha, Omega = network, nlambda = 100)
+    #         }
+    #         index <- which.min(abs(fit$fit$nzero - cell_num))
+    #         Coefs <- as.numeric(fit$Beta[,index])
+    #         Cell1 <- Coefs[which(Coefs > 0)]
+    #         Cell2 <- Coefs[which(Coefs < 0)]
+    #
+    #         X_test <- X[c_index,]
+    #         Y_test <- Y2[c_index]
+    #         MSE_test_back[[i]][j] <- mean((Y_test - X_test%*%Coefs)^2)
+    #     }
+    #     #pb2$tick()
+    #     Sys.sleep(1 / 100)
+    #     if (i == n) cat("Finished!\n")
+    # }
+    # statistic  <- mean(MSE_test_real)
+    # background <- NULL
+    # for (i in 1:n){
+    #     background[i] <- mean(MSE_test_back[[i]][,1])
+    # }
+    # p <- sum(background < statistic)/n
+    #
+    # print(sprintf("Test statistic = %s", formatC(statistic, format = "f", digits = 3)))
+    # print(sprintf("Reliability significance test p = %s", formatC(p, format = "f", digits = 3)))
 
-            X_test <- X[c_index,]
-            Y_test <- Y2[c_index]
-            MSE_test_back[[i]][j] <- mean((Y_test - X_test%*%Coefs)^2)
-        }
-        #pb2$tick()
-        Sys.sleep(1 / 100)
-        if (i == n) cat("Finished!\n")
+    if(is.null(bkg_stat)){
+        print("|**************************************************|")
+        print("Perform cross-validation on X with permutated label")
+
+        old_plan <- future::plan(future::multisession, workers = workers)
+        on.exit(future::plan(old_plan), add = TRUE) # restore the caller's plan
+        # future_lapply replaces the 'for (i in 1:n)' loop
+        MSE_test_back <- future.apply::future_lapply(1:n, function(i) {
+            set.seed(i + 100)
+            Y2 <- Y[sample(m)] # Permute labels
+
+            # Local nfold loop inside each permutation
+            fold_results <- numeric(nfold)
+            for (j in 1:nfold) {
+                c_index <- which(index0 == j)
+                X_train <- X[-c_index, ]
+                Y_train <- Y2[-c_index]
+
+                fit <- APML1(X_train, Y_train, family = "gaussian", penalty = "Net",
+                             alpha = alpha, Omega = network, nlambda = 100)
+                if (is.null(fit$fit)) {
+                    warning("APML1 failed on permutation ", i, ", fold ", j, "; recorded as NA")
+                    fold_results[j] <- NA
+                    next
+                }
+                index <- which.min(abs(fit$fit$nzero - cell_num))
+                Coefs <- as.numeric(fit$Beta[, index])
+
+                X_test <- X[c_index, ]
+                Y_test <- Y2[c_index]
+                fold_results[j] <- mean((Y_test - X_test%*%Coefs)^2)
+            }
+            return(fold_results)
+        }, future.seed = TRUE) # CRITICAL for correct random numbers in parallel
+
+        background <- sapply(MSE_test_back, mean, na.rm = TRUE) # skip failed folds
+        background <- background[!is.na(background)] # drop permutations where every fold failed
+    } else{
+        # Reuse a previously computed background (one mean MSE per permutation)
+        background = bkg_stat
+        MSE_test_back = NA
     }
     statistic  <- mean(MSE_test_real)
-    background <- NULL
-    for (i in 1:n){
-        background[i] <- mean(MSE_test_back[[i]][,1])
-    }
-    p <- sum(background < statistic)/n
+    p <- sum(background < statistic)/length(background) # bkg_stat may not have length n; lower MSE is better
 
-    print(sprintf("Test statistic = %s", formatC(statistic, format = "f", digits = 3)))
-    print(sprintf("Reliability significance test p = %s", formatC(p, format = "f", digits = 3)))
+    print(sprintf("Test statistic = %s", formatC(statistic, format = "f", digits = 8)))          ### MOD: Increase digits
+    print(sprintf("Reliability significance test p = %s", formatC(p, format = "f", digits = 8))) ### MOD: Increase digits
+    ############################################################################
 
     return(list(statistic = statistic,
                 p = p,
                 MSE_test_real = MSE_test_real,
-                MSE_test_back = MSE_test_back))
+                MSE_test_back = MSE_test_back,
+                background = background)) ### MOD: one mean per permutation; pass back as bkg_stat ###
 }
 

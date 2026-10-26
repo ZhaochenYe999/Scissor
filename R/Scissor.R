@@ -15,27 +15,36 @@
 #' with the phenotype of interest, respectively.
 #'
 #' @param bulk_dataset Bulk expression matrix of related disease. Each row represents a gene and each column represents a sample.
-#' @param sc_dataset Single-cell RNA-seq expression matrix of related disease. Each row represents a gene and each column represents a sample.
-#' A Seurat object that contains the preprocessed data and constructed network is preferred. Otherwise, a cell-cell similarity network is
-#' constructed based on the input matrix.
-#' @param phenotype Phenotype annotation of each bulk sample. It can be a continuous dependent variable,
+#' Counts, TPM or CPM all work, since the data are quantile-normalized together with the single-cell data. Genes expressed in fewer
+#' than 10 samples and samples with fewer than 10 expressed genes are removed.
+#' @param sc_dataset A Seurat (v5) object with raw counts. It is preprocessed with \code{\link{sc_preprocess}} (HVG selection,
+#' optional Harmony batch correction, cell-cell graph construction) on every run without \code{Load_file}.
+#' @param phenotype Phenotype annotation of each bulk sample, named by bulk sample. It can be a continuous dependent variable,
 #' binary group indicator vector, or clinical survival data:
 #'   \itemize{
-#'   \item Continuous dependent variable. Should be a quantitative vector for \code{family = gaussian}.
-#'   \item Binary group indicator vector. Should be either a 0-1 encoded vector or a factor with two levels for \code{family = binomial}.
-#'   \item Clinical survival data. Should be a two-column matrix with columns named 'time' and 'status'. The latter is a binary variable,
-#'   with '1' indicating event (e.g.recurrence of cancer or death), and '0' indicating right censored.
-#'   The function \code{Surv()} in package survival produces such a matrix.
+#'   \item Continuous dependent variable. Should be a named quantitative vector for \code{family = gaussian}.
+#'   \item Binary group indicator vector. Should be a named 0-1 encoded vector or a factor with two levels for \code{family = binomial}.
+#'   For a factor, the first level is coded 0 and the second 1.
+#'   \item Clinical survival data. Should be a two-column data frame or matrix with bulk sample names as rownames and columns named
+#'   'time' and 'status'. The latter is a binary variable, with '1' indicating event (e.g.recurrence of cancer or death), and '0'
+#'   indicating right censored.
 #'   }
-#' @param tag Names for each phenotypic group. Used for linear and logistic regressions only.
+#' @param tag Names for each phenotypic group. Required for logistic regression. For linear regression, give one tag per distinct
+#' phenotype value (e.g. disease stages), or leave \code{NULL} for a continuous phenotype.
 #' @param alpha Parameter used to balance the effect of the l1 norm and the network-based penalties. It can be a number or a searching vector.
 #' If \code{alpha = NULL}, a default searching vector is used. The range of alpha is in \code{[0,1]}. A larger alpha lays more emphasis on the l1 norm.
 #' @param cutoff Cutoff for the percentage of the Scissor selected cells in total cells. This parameter is used to restrict the number of the
 #' Scissor selected cells. A cutoff less than \code{50\%} (default \code{20\%}) is recommended depending on the input data.
 #' @param family Response type for the regression model. It depends on the type of the given phenotype and
 #' can be \code{family = gaussian} for linear regression, \code{family = binomial} for classification, or \code{family = cox} for Cox regression.
-#' @param Save_file File name for saving the preprocessed regression inputs into a RData.
-#' @param Load_file File name for loading the preprocessed regression inputs. It can help to tune the model parameter \code{alpha}.
+#' @param sc_correct_batch Logical. Run Harmony batch correction on \code{sc_dataset}. Only used if \code{sc_batch} is found in its metadata.
+#' @param sc_batch Name of the \code{sc_dataset} metadata column giving the batch. If \code{NULL}, no batch correction is done.
+#' @param only_hvg Logical. Use only the highly variable genes of \code{sc_dataset} (shared with the bulk data) to correlate cells and bulk samples.
+#' If \code{FALSE}, all shared genes are used.
+#' @param n_hvg Number of highly variable genes to select in \code{sc_dataset}.
+#' @param Save_file File name for saving the preprocessed regression inputs into an RDS file.
+#' @param Load_file File name of an RDS file saved by a previous run (\code{Save_file}). Skips preprocessing; it can help to tune the
+#' model parameter \code{alpha}. \code{.RData} files saved by the original Scissor cannot be loaded.
 #' Please see Scissor Tutorial for more details.
 #'
 #' @return This function returns a list with the following components:
@@ -49,31 +58,71 @@
 #' @export
 Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
                     alpha = NULL, cutoff = 0.2, family = c("gaussian","binomial","cox"),
-                    Save_file = "Scissor_inputs.RData", Load_file = NULL){
+                    sc_correct_batch = TRUE, sc_batch = NULL, only_hvg = TRUE, n_hvg = 4000, ### MOD: add mew parameters for sc_preprocess ### 
+                    Save_file = "Scissor_inputs.rds", Load_file = NULL){                     ### MOD: save RDS file rather than Rda ### 
+    
+    family = match.arg(family) ### MOD: defaults to "gaussian" if not given ###
     library(Seurat)
     library(Matrix)
     library(preprocessCore)
 
 
     if (is.null(Load_file)){
-        common <- intersect(rownames(bulk_dataset), rownames(sc_dataset))
+        bulk_dataset = as.matrix(bulk_dataset)
+
+        ### MOD: Preprocess the sc_dataset with batch correction ###
+        if(sc_correct_batch && !is.null(sc_batch) && sc_batch %in% colnames(sc_dataset@meta.data)){
+            sc_dataset = sc_preprocess(sc_dataset, assay=DefaultAssay(sc_dataset), correct_batch=sc_correct_batch, group.by.vars=sc_batch, nfeatures_batch=n_hvg+1000, nfeatures=n_hvg)
+        } else{
+            message("No batch correction. Possible reasons: (1) sc_correct_batch set to FALSE; (2) cannot find ",sc_batch," in sc_dataset metadata.")
+            sc_dataset = sc_preprocess(sc_dataset, assay=DefaultAssay(sc_dataset), correct_batch=F, nfeatures_batch=n_hvg+1000, nfeatures=n_hvg)
+        }
+
+        ### MOD: Keep the cell-cell graph sparse ###
+        network = as(sc_dataset@graphs[[paste0(DefaultAssay(sc_dataset), "_snn")]],"dgCMatrix")
+        diag(network) = 0
+        network = drop0(network)
+
+        ### MOD: Basic QC on bulk expression matrix ###
+        bulk_dataset = .qc_on_mtx(bulk_dataset,row_min_cnt = 10,col_min_cnt = 10)
+
+        ### MOD: Use all features or only the highly variable features for integrating single-cell and bulk data ###
+        if(only_hvg){
+            common = intersect(rownames(bulk_dataset), VariableFeatures(sc_dataset))
+        } else{
+            common <- intersect(rownames(bulk_dataset), rownames(sc_dataset))
+        }
+        
         if (length(common) == 0) {
             stop("There is no common genes between the given single-cell and bulk samples.")
         }
-        if (class(sc_dataset) == "Seurat"){
-            sc_exprs <- as.matrix(sc_dataset@assays$RNA@data)
-            network  <- as.matrix(sc_dataset@graphs$RNA_snn)
-        }else{
-            sc_exprs <- as.matrix(sc_dataset)
-            Seurat_tmp <- CreateSeuratObject(sc_dataset)
-            Seurat_tmp <- FindVariableFeatures(Seurat_tmp, selection.method = "vst", verbose = F)
-            Seurat_tmp <- ScaleData(Seurat_tmp, verbose = F)
-            Seurat_tmp <- RunPCA(Seurat_tmp, features = VariableFeatures(Seurat_tmp), verbose = F)
-            Seurat_tmp <- FindNeighbors(Seurat_tmp, dims = 1:10, verbose = F)
-            network  <- as.matrix(Seurat_tmp@graphs$RNA_snn)
+
+        # Align the gene and sample lists
+        bulk_dataset = bulk_dataset[common,]
+        sc_exprs = as.matrix(sc_dataset[[DefaultAssay(sc_dataset)]]$counts[common,])
+        pheno_samples = if(family == "cox") rownames(phenotype) else names(phenotype)
+        if(is.null(pheno_samples)){
+            stop("phenotype must be named by bulk sample: rownames for family = 'cox', names for 'gaussian'/'binomial'.")
         }
-        diag(network) <- 0
-        network[which(network != 0)] <- 1
+        samples = intersect(pheno_samples, colnames(bulk_dataset))
+        bulk_dataset = bulk_dataset[,samples]
+        phenotype = if(family == "cox") phenotype[samples,] else phenotype[samples]
+        
+        # if (class(sc_dataset) == "Seurat"){
+        #     sc_exprs <- as.matrix(sc_dataset@assays$RNA@data)
+        #     network  <- as.matrix(sc_dataset@graphs$RNA_snn)
+        # }else{
+        #     sc_exprs <- as.matrix(sc_dataset)
+        #     Seurat_tmp <- CreateSeuratObject(sc_dataset)
+        #     Seurat_tmp <- FindVariableFeatures(Seurat_tmp, selection.method = "vst", verbose = F)
+        #     Seurat_tmp <- ScaleData(Seurat_tmp, verbose = F)
+        #     Seurat_tmp <- RunPCA(Seurat_tmp, features = VariableFeatures(Seurat_tmp), verbose = F)
+        #     Seurat_tmp <- FindNeighbors(Seurat_tmp, dims = 1:10, verbose = F)
+        #     network  <- as.matrix(Seurat_tmp@graphs$RNA_snn)
+        # }
+        # diag(network) <- 0
+        # network[which(network != 0)] <- 1
+        #############################################################################################################
 
         dataset0 <- cbind(bulk_dataset[common,], sc_exprs[common,])         # Dataset before quantile normalization.
         dataset1 <- normalize.quantiles(dataset0)                           # Dataset after  quantile normalization.
@@ -94,7 +143,18 @@ Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
             warning("The median correlation between the single-cell and bulk samples is relatively low.")
         }
         if (family == "binomial"){
-            Y <- as.numeric(phenotype)
+            ##### MOD: code factor/character phenotypes as 0/1 #####
+            # Y <- as.numeric(phenotype)
+            if (is.factor(phenotype) || is.character(phenotype)){
+                phenotype <- factor(phenotype)
+                Y <- as.numeric(phenotype) - 1   # first level -> 0, second level -> 1
+            }else{
+                Y <- as.numeric(phenotype)
+            }
+            if (!all(Y %in% c(0, 1))){
+                stop("For family = 'binomial', phenotype must be 0/1 or a factor with two levels.")
+            }
+            ########################################################
             z <- table(Y)
             if (length(z) != length(tag)){
                 stop("The length differs between tags and phenotypes. Please check Scissor inputs and selected regression type.")
@@ -105,14 +165,33 @@ Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
         }
         if (family == "gaussian"){
             Y <- as.numeric(phenotype)
-            z <- table(Y)
-            if (length(z) != length(tag)){
-                stop("The length differs between tags and phenotypes. Please check Scissor inputs and selected regression type.")
+            ### MOD: allow continuous phenotypes; tags are only needed for grouped (e.g. stage) phenotypes ###
+            # z <- table(Y)
+            # if (length(z) != length(tag)){
+            #     stop("The length differs between tags and phenotypes. Please check Scissor inputs and selected regression type.")
+            # }else{
+            #     tmp <- paste(z, tag)
+            #     print(paste0("Current phenotype contains ", paste(tmp[1:(length(z)-1)], collapse = ", "), ", and ", tmp[length(z)], " samples."))
+            #     print("Perform linear regression on the given phenotypes:")
+            # }
+            if (any(is.na(Y))){
+                stop("For family = 'gaussian', phenotype must be numeric without missing values.")
+            }
+            if (is.null(tag)){
+                # Continuous phenotype: no groups to name
+                print(sprintf("Current phenotype is continuous across %d samples (min = %s, median = %s, max = %s).",
+                              length(Y), signif(min(Y), 3), signif(median(Y), 3), signif(max(Y), 3)))
             }else{
+                # Grouped phenotype: one tag per distinct value, as in the original Scissor
+                z <- table(Y)
+                if (length(z) != length(tag)){
+                    stop("The length differs between tags and phenotypes. Please check Scissor inputs and selected regression type.")
+                }
                 tmp <- paste(z, tag)
                 print(paste0("Current phenotype contains ", paste(tmp[1:(length(z)-1)], collapse = ", "), ", and ", tmp[length(z)], " samples."))
-                print("Perform linear regression on the given phenotypes:")
             }
+            print("Perform linear regression on the given phenotypes:")
+            ####################################################################################################
         }
         if (family == "cox"){
             Y <- as.matrix(phenotype)
@@ -122,7 +201,13 @@ Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
                 print("Perform cox regression on the given clinical outcomes:")
             }
         }
-        save(X, Y, network, Expression_bulk, Expression_cell, file = Save_file)
+
+        ### MOD: Save the intermediate results for the first run ####
+        # save(X, Y, network, Expression_bulk, Expression_cell, file = Save_file)
+        res = list(X = X, Y = Y, network = network, Expression_bulk = Expression_bulk, Expression_cell = Expression_cell)
+        saveRDS(res,file = Save_file) 
+        #############################################################
+
     }else{
         ###### MOD: Load the preprocessed data ######
         # load(Load_file)
