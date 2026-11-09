@@ -91,5 +91,5 @@ cvNetLogC <- function(X, y, alpha, lambda, nlambda, wbeta, wbetai, Omega, loc, n
 
 # Register entry points for exported C++ functions
 methods::setLoadAction(function(ns) {
-    .Call('_Scissor_RcppExport_registerCCallable', PACKAGE = 'Scissor')
+    .Call(`_Scissor_RcppExport_registerCCallable`)
 })

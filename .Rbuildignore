@@ -1,3 +1,4 @@
 ^\.gitignore$
 ^Figure_Method\.jpg$
 ^LICENSE$
+\.ipynb_checkpoints$

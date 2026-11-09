@@ -4,3 +4,4 @@ src/*.dll
 .Rhistory
 .RData
 Rplots.pdf
+.ipynb_checkpoints/

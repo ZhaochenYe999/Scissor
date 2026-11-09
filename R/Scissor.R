@@ -99,7 +99,7 @@ Scissor <- function(bulk_dataset, sc_dataset, phenotype, tag = NULL,
 
         # Align the gene and sample lists
         bulk_dataset = bulk_dataset[common,]
-        sc_exprs = as.matrix(sc_dataset[[DefaultAssay(sc_dataset)]]$counts[common,])
+        sc_exprs = as.matrix(sc_dataset[[DefaultAssay(sc_dataset)]]$data[common,])
         pheno_samples = if(family == "cox") rownames(phenotype) else names(phenotype)
         if(is.null(pheno_samples)){
             stop("phenotype must be named by bulk sample: rownames for family = 'cox', names for 'gaussian'/'binomial'.")
