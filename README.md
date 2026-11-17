@@ -43,12 +43,9 @@ Improvements and new features of Scissor will be updated on a regular basis. Ple
 This is a modified version of Scissor (modified by Zhaochen Ye, October 2026), distributed under the same GNU General Public License v3.0. Changed code is marked with `MOD` comments, with the original code kept as comments.
 
 Main modifications include:
-1. Preprocessing of single-cell and bulk data
-   Batch correction is included for single-cell data preprocessing to avoid its effects on the cell-cell neighborhood.
-   Highly variable genes are selected for computing the cell-sample expression matrix for less runtime and comparable accuracy.
-2. Keeping the cell neighborhood matrix sparse
-   Sparse matrix operations are enabled for better runtime and memory usage.
-3. Parallelization of permutations in reliability test to save runtime.
+1. **Preprocessing of single-cell and bulk data.** (1) Batch correction is added. (2) Highly variable genes are selected for computing the cell-sample expression matrix for less runtime and comparable results.
+2. **Keeping the cell neighborhood matrix sparse.** Sparse matrix operations are enabled for better runtime and memory usage.
+3. **Parallelization of permutations in reliability test** to save runtime.
 
 #### Installation of this modified version ####
 Prerequisites:
